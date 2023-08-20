@@ -2,6 +2,7 @@ import copy
 import json
 from typing import Union, List
 from urllib.parse import urlencode
+import re
 
 from youtubesearchpython.core.constants import *
 from youtubesearchpython.core.requests import RequestCore
@@ -108,6 +109,19 @@ class VideoCore(RequestCore):
         })
         self.data = CLIENTS["MWEB"]
 
+    def prepare_next_request(self):
+        self.url = 'https://www.youtube.com/youtubei/v1/next' + "?" + urlencode({
+            'key': searchKey
+        })
+        self.data = copy.deepcopy(requestPayload)
+        '''self.data['autonavState'] = "STATE_OFF"
+        self.data['captionsRequested'] = False
+        self.data['contentCheckOk'] = False
+        self.data['playbackContext'] = {'vis' : 0, 'lactMilliseconds' : "-1"}
+        self.data['racyCheckOk'] = False'''
+        self.data['videoId'] = getVideoId(self.videoLink)
+        
+
     def sync_html_create(self):
         self.prepare_html_request()
         response = self.syncPostRequest()
@@ -117,6 +131,16 @@ class VideoCore(RequestCore):
         self.prepare_html_request()
         response = await self.asyncPostRequest()
         self.HTMLresponseSource = response.json()
+
+    def sync_next_create(self):
+        self.prepare_next_request()
+        response = self.syncPostRequest()        
+        self.nextResponseSource = response.json()
+
+    async def async_next_create(self):
+        self.prepare_next_request()
+        response = await self.syncPostRequest()        
+        self.nextResponseSource = response.json()
 
     def __parseSource(self) -> None:
         try:
@@ -132,6 +156,85 @@ class VideoCore(RequestCore):
 
     def __getVideoComponent(self, mode: str) -> None:
         videoComponent = {}
+
+        try:
+            self.__videoComponent
+        except:
+            self.__videoComponent = {}
+            pass
+
+        #Putting this first to avoid the publish data switch in the other modes
+        if mode in ['getNextInfo', None]:
+            try:
+                responseSource = self.nextResponseSource
+            except:
+                responseSource = None
+
+            videorenderer: list = getValue(responseSource, ["playerOverlays", "playerOverlayRenderer", "endScreen", "watchNextEndScreenRenderer", "results"])
+            videos = []
+            for video in videorenderer:
+                try:
+                    video = video["endScreenVideoRenderer"]
+                    j = {
+                        "isPlaylist" : False,
+                        "id": getValue(video, ["videoId"]),
+                        "thumbnails": getValue(video, ["thumbnail", "thumbnails"]),
+                        "title": getValue(video, ["title", "simpleText"]),
+                        "channel": {
+                            "name": getValue(video, ["shortBylineText", "runs", 0, "text"]),
+                            "id": getValue(video, ["shortBylineText", "runs", 0, "navigationEndpoint", "browseEndpoint", "browseId"]),
+                            "link": getValue(video, ["shortBylineText", "runs", 0, "navigationEndpoint", "browseEndpoint", "canonicalBaseUrl"]),
+                        },
+                        "duration": getValue(video, ["lengthText", "simpleText"]),
+                        "accessibility": {
+                            "title": getValue(video, ["title", "accessibility", "accessibilityData", "label"]),
+                            "duration": getValue(video, ["lengthText", "accessibility", "accessibilityData", "label"]),
+                        },
+                        "link": "https://www.youtube.com" + getValue(video, ["navigationEndpoint", "commandMetadata", "webCommandMetadata", "url"]),
+                        "isPlayable": getValue(video, ["isPlayable"]),
+                        "videoCount": 1,
+                    }
+                    videos.append(j)
+                    continue
+                except:
+                    pass
+
+                try:
+                    video = video["endScreenPlaylistRenderer"]
+                    j = {
+                        "isPlaylist" : True,
+                        "id": getValue(video, ["playlistId"]),
+                        "thumbnails": getValue(video, ["thumbnail", "thumbnails"]),
+                        "title": getValue(video, ["title", "simpleText"]),
+                        "channel": {
+                            "name": getValue(video, ["shortBylineText", "runs", 0, "text"]),
+                            "id": getValue(video, ["shortBylineText", "runs", 0, "navigationEndpoint", "browseEndpoint", "browseId"]),
+                            "link": getValue(video, ["shortBylineText", "runs", 0, "navigationEndpoint", "browseEndpoint", "canonicalBaseUrl"]),
+                        },
+                        "duration": getValue(video, ["lengthText", "simpleText"]),
+                        "accessibility": {
+                            "title": getValue(video, ["title", "accessibility", "accessibilityData", "label"]),
+                            "duration": getValue(video, ["lengthText", "accessibility", "accessibilityData", "label"]),
+                        },
+                        "link": "https://www.youtube.com" + getValue(video, ["navigationEndpoint", "commandMetadata", "webCommandMetadata", "url"]),
+                        "isPlayable": getValue(video, ["isPlayable"]),
+                        "videoCount": getValue(video, ["videoCount"]),
+                    }
+                    videos.append(j)
+                    continue
+                except:
+                    pass
+            
+            component = {
+                'recommendations': videos,
+                'autoGeneratedCategory': getValue(responseSource, ['contents', 'twoColumnWatchNextResults', 'results', 'results', 'contents', 1, 'videoSecondaryInfoRenderer', 'metadataRowContainer', 'metadataRowContainerRenderer', 'rows', 0, 'richMetadataRowRenderer', 'contents', 0, 'richMetadataRenderer', 'title', 'simpleText']),
+            }
+            videoComponent.update(component)
+
+            self.__videoComponent.update(videoComponent)
+
+            #Return here to avoid the publish data switch in the other modes
+            return
         if mode in ['getInfo', None]:
             try:
                 responseSource = self.responseSource
@@ -162,6 +265,7 @@ class VideoCore(RequestCore):
                 'uploadDate': getValue(responseSource, ['microformat', 'playerMicroformatRenderer', 'uploadDate']),
                 'isFamilySafe': getValue(responseSource, ['microformat', 'playerMicroformatRenderer', 'isFamilySafe']),
                 'category': getValue(responseSource, ['microformat', 'playerMicroformatRenderer', 'category']),
+                'hashtags': re.findall('#\w+', getValue(responseSource, ['videoDetails', 'shortDescription'])),
             }
             component['isLiveNow'] = component['isLiveContent'] and component['duration']['secondsText'] == "0"
             component['link'] = 'https://www.youtube.com/watch?v=' + component['id']
@@ -176,4 +280,4 @@ class VideoCore(RequestCore):
         if self.enableHTML:
             videoComponent["publishDate"] = getValue(self.HTMLresponseSource, ['microformat', 'playerMicroformatRenderer', 'publishDate'])
             videoComponent["uploadDate"] = getValue(self.HTMLresponseSource, ['microformat', 'playerMicroformatRenderer', 'uploadDate'])
-        self.__videoComponent = videoComponent
+        self.__videoComponent.update(videoComponent)

@@ -351,6 +351,7 @@ class Video:
         vc = VideoCore(videoLink, "getInfo", mode, timeout, True)
         vc.sync_html_create()
         vc.post_request_only_html_processing()
+        
         return vc.result
 
     @staticmethod
@@ -537,6 +538,31 @@ class Video:
         '''
         vc = VideoCore(videoLink, "getFormats", mode, timeout, False)
         vc.sync_create()
+        return vc.result
+    
+    @staticmethod
+    def getNextInfo(videoLink: str, mode: int = ResultMode.dict, timeout: int = None) -> Union[dict, str, None]:
+        '''Fetches information about recommendations from the video.        
+        '''
+        vc = VideoCore(videoLink, "getNextInfo", mode, timeout, True)
+        vc.sync_next_create()
+        vc.post_request_only_html_processing()
+        
+        return vc.result
+    
+    @staticmethod
+    def getAllInfo(videoLink: str, mode: int = ResultMode.dict, timeout: int = None) -> Union[dict, str, None]:
+        '''Fetches information about recommendations from the video, and basic video information.        
+        '''
+        vc = VideoCore(videoLink, "getInfo", mode, timeout, True)
+        vc.sync_html_create()
+        vc.post_request_only_html_processing()
+
+        #Process again for the next info (I hate this, but I want to maintain the spirit of the original code)
+        vc.componentMode = "getNextInfo"
+        vc.sync_next_create()
+        vc.post_request_only_html_processing()
+        
         return vc.result
 
 
